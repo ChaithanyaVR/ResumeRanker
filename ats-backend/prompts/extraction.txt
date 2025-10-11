@@ -1,0 +1,2 @@
+Extract candidate name, email, phone, and a concise skills list from the provided resume. 
+Return JSON with fields: name, email, phone, skills (array), summary (string).
