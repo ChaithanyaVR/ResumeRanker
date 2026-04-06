@@ -1,20 +1,20 @@
 "use client";
 import { useAuth } from "@/context/authContext";
 import React, { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter ,useSearchParams} from "next/navigation";
 import {
   createJobWithResumes,
   shortlistCandidates,
   fetchJobWithResumes,
   fetchGeminiResponses,
+  fetchRepositoryResumes,
 } from "utils/jobApi";
 import GeminiResponses from "@/components/GeminiResponse/GeminiResponses";
 
 const HomePage = () => {
   const { userLoggedIn, loading, currentUser } = useAuth();
   const router = useRouter();
-  const cache = useRef({});
-
+  const searchParams = useSearchParams();
   const [jobTitle, setJobTitle] = useState("");
   const [jobDescription, setJobDescription] = useState("");
   const [files, setFiles] = useState([]);
@@ -22,9 +22,19 @@ const HomePage = () => {
   const [promptOption, setPromptOption] = useState("explanation");
   const [shortlistResults, setShortlistResults] = useState([]);
   const [currentJobId, setCurrentJobId] = useState(null);
+  const [showRepositoryBox, setShowRepositoryBox] = useState(false);
+  const [repositoryResumes, setRepositoryResumes] = useState([]);
+  const [selectedRepoResumes, setSelectedRepoResumes] = useState([]);
+  const [repositorySearch, setRepositorySearch] = useState("");
+  const [activeFilters, setActiveFilters] = useState([]);
+  const [repositoryLoading, setRepositoryLoading] = useState(false);
+  const [repositoryError, setRepositoryError] = useState("");
+  const resultsSectionRef = useRef(null);
 
   const fileInputRef = useRef(null);
   const moreFilesRef = useRef(null);
+
+
 
   // Load saved job id on mount
   useEffect(() => {
@@ -32,32 +42,53 @@ const HomePage = () => {
     if (saved) setCurrentJobId(saved);
   }, []);
 
-  useEffect(() => {
-    const savedJobId = localStorage.getItem("currentJobId");
-    if (savedJobId) {
-      setCurrentJobId(savedJobId);
 
-      fetchJobWithResumes(savedJobId)
-        .then((data) => {
-          setJobTitle(data.job_title);
-          setJobDescription(data.job_description);
-          setFiles(
-            data.resumes.map((r) => ({
-              name: r.filename,
-              path: r.file_path,
-              resume_id: r.resume_id,
-            }))
-          );
-        })
-        .catch((err) => console.error("Failed to load saved job:", err));
-    }
-  }, []);
+
+
+useEffect(() => {
+  const queryJobId = searchParams.get("jobId");
+  const queryPrompt = searchParams.get("prompt");
+  const savedJobId = queryJobId || localStorage.getItem("currentJobId");
+
+  if (queryPrompt) {
+    setPromptOption(queryPrompt);
+  }
+
+  if (!savedJobId) return;
+
+  setCurrentJobId(savedJobId);
+  localStorage.setItem("currentJobId", savedJobId);
+
+  fetchJobWithResumes(savedJobId)
+    .then((data) => {
+      setJobTitle(data.job_title);
+      setJobDescription(data.job_description);
+      setFiles(
+        data.resumes.map((r) => ({
+          name: r.filename,
+          path: r.file_path,
+          resume_id: r.resume_id,
+        })),
+      );
+    })
+    .catch((err) => console.error("Failed to load saved job:", err));
+}, [searchParams]);
+
+
+  const scrollToResults = () => {
+    setTimeout(() => {
+      resultsSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }, 150);
+  };
 
   // Reset everything
   const handleReset = (confirmFirst = true) => {
     if (confirmFirst) {
       const ok = window.confirm(
-        "Start a new job? This will clear uploaded files and the saved job ID."
+        "Start a new job? This will clear uploaded files and the saved job ID.",
       );
       if (!ok) return;
     }
@@ -69,10 +100,92 @@ const HomePage = () => {
     setFiles([]);
     setShortlistResults([]);
     setPromptOption("explanation");
+    setSelectedRepoResumes([]);
+    setActiveFilters([]);
+    setRepositorySearch("");
+    setShowRepositoryBox(false);
 
     if (fileInputRef.current) fileInputRef.current.value = "";
     if (moreFilesRef.current) moreFilesRef.current.value = "";
   };
+
+  const loadRepositoryResumes = async () => {
+    if (!currentUser?.uid) return;
+
+    try {
+      setRepositoryLoading(true);
+      setRepositoryError("");
+      const resumes = await fetchRepositoryResumes(currentUser.uid);
+      setRepositoryResumes(resumes);
+    } catch (err) {
+      setRepositoryError(err.message || "Failed to load repository resumes");
+    } finally {
+      setRepositoryLoading(false);
+    }
+  };
+
+  const handleRepositoryToggle = async () => {
+    handleProtectedInteraction();
+    if (!currentUser?.uid) return;
+
+    const nextValue = !showRepositoryBox;
+    setShowRepositoryBox(nextValue);
+
+    if (nextValue && repositoryResumes.length === 0) {
+      await loadRepositoryResumes();
+    }
+  };
+
+  const addFilterChip = () => {
+    const value = repositorySearch.trim();
+    if (!value) return;
+
+    const alreadyExists = activeFilters.some(
+      (item) => item.toLowerCase() === value.toLowerCase(),
+    );
+
+    if (!alreadyExists) {
+      setActiveFilters((prev) => [...prev, value]);
+    }
+
+    setRepositorySearch("");
+  };
+
+  const removeFilterChip = (chip) => {
+    setActiveFilters((prev) => prev.filter((item) => item !== chip));
+  };
+
+  const toggleRepositoryResume = (resume) => {
+    setSelectedRepoResumes((prev) => {
+      const exists = prev.some((item) => item.id === resume.id);
+      if (exists) {
+        return prev.filter((item) => item.id !== resume.id);
+      }
+      return [...prev, resume];
+    });
+  };
+
+  const filteredRepositoryResumes = repositoryResumes.filter((resume) => {
+    if (activeFilters.length === 0) return true;
+
+    const searchableText = (
+      resume.searchable_text ||
+      [resume.title || resume.filename || "", ...(resume.keywords || [])].join(
+        " ",
+      )
+    ).toLowerCase();
+
+    return activeFilters.every((filter) =>
+      searchableText.includes(filter.toLowerCase()),
+    );
+  });
+
+  const effectiveRepoResumes =
+    selectedRepoResumes.length > 0
+      ? selectedRepoResumes
+      : showRepositoryBox
+        ? filteredRepositoryResumes
+        : [];
 
   // Redirect to login if needed
   const handleProtectedInteraction = () => {
@@ -90,80 +203,69 @@ const HomePage = () => {
       return;
     }
 
-    if (!jobTitle || !jobDescription || files.length === 0) {
-      alert("Please fill all fields and upload resumes.");
+    if (!jobTitle || !jobDescription) {
+      alert("Please fill all fields.");
+      return;
+    }
+
+    if (files.length === 0 && effectiveRepoResumes.length === 0) {
+      alert("Please upload resumes or choose resumes from repository.");
       return;
     }
 
     try {
       let jobId = currentJobId;
 
-      // ✅ Only create a new job if one doesn’t exist
       if (!jobId) {
         const jobData = await createJobWithResumes({
           user_id: currentUser.uid,
           job_title: jobTitle,
           job_description: jobDescription,
           files,
+          repositoryResumeIds: effectiveRepoResumes.map((item) => item.id),
         });
+
         jobId = jobData.job_id;
         setCurrentJobId(jobId);
         localStorage.setItem("currentJobId", jobId);
-      } else {
-       
-        const cacheKey = `${jobId}_${promptOption}`;
-        if (cache.current[cacheKey]) {
-         
-          setShortlistResults(cache.current[cacheKey]);
-        } else {
-          const cached = await fetchGeminiResponses(jobId, promptOption);
-          if (cached.length > 0) {
-           
-            cache.current[cacheKey] = cached; // store in memory cache
-            setShortlistResults(cached);
-          } else {
-           
-            const results = await shortlistCandidates({
-              job_id: jobId,
-              topK: 5,
-              rerank: true,
-              promptType: promptOption,
-            });
-            cache.current[cacheKey] = results; // store AI results in memory cache
-            setShortlistResults(results);
-          }
-        }
       }
 
       await fetchResults(jobId, promptOption);
     } catch (err) {
-      console.error("❌ Error:", err);
+      console.error("Error:", err);
       alert(err.message || "Something went wrong.");
     }
   };
 
   // Fetch results for a given prompt type
-  const fetchResults = async (jobId, promptType) => {
-    try {
-      const results = await shortlistCandidates({
-        job_id: jobId,
-        topK: 5,
-        rerank: true,
-        promptType,
-      });
-      setShortlistResults(results);
-     
-    } catch (err) {
-      if (err.message.includes("AI model overloaded")) {
-        alert("⚠️ AI model is overloaded. Results will be generated later.");
-      } else {
-        console.error("❌ Error:", err);
-        alert("Error fetching results.");
-      }
-    }
-  };
+ useEffect(() => {
+    if (!currentJobId || !promptOption) return;
 
- 
+    const loadResults = async () => {
+      try {
+        const results = await shortlistCandidates({
+          job_id: currentJobId,
+          topK: 5,
+          rerank: true,
+          promptType: promptOption,
+        });
+
+        console.log("shortlisted results...", results);
+        setShortlistResults(results);
+        scrollToResults();
+      } catch (err) {
+        if (err.message?.includes("AI model overloaded")) {
+          alert("AI model is overloaded. Results will be generated later.");
+        } else {
+          console.error("Error fetching results:", err);
+        }
+      }
+    };
+
+    loadResults();
+  }, [currentJobId, promptOption]);
+
+
   return (
     <div className="min-h-screen bg-[#0f172a] text-white p-6 md:p-12 mt-12">
       <div className="max-w-7xl mx-auto flex flex-col md:flex-row gap-10">
@@ -202,6 +304,7 @@ const HomePage = () => {
                 Choose Prompt{" "}
               </label>{" "}
               <select
+                value={promptOption}
                 onFocus={handleProtectedInteraction}
                 className="w-full px-4 py-2 rounded-md bg-gray-800 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500"
                 onChange={(e) => setPromptOption(e.target.value)}
@@ -210,8 +313,16 @@ const HomePage = () => {
                 <option value="explanation">Explanation</option>{" "}
                 <option value="extraction">Extraction</option>{" "}
                 <option value="scoring">Scoring</option>{" "}
+                <option value="suggestion">Suggestion</option>{" "}
               </select>{" "}
             </div>{" "}
+            <button
+              type="button"
+              onClick={handleRepositoryToggle}
+              className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded-md"
+            >
+              Add From Repository
+            </button>
             <div>
               {" "}
               <label className="block text-sm font-semibold mb-1">
@@ -254,27 +365,147 @@ const HomePage = () => {
                 />{" "}
               </div>{" "}
             </div>
-            {files.length > 0 && (
+            {showRepositoryBox && (
+              <div className="border border-gray-600 rounded-xl p-4 bg-gray-900 space-y-4">
+                <div className="flex flex-col md:flex-row gap-3">
+                  <input
+                    value={repositorySearch}
+                    onChange={(e) => setRepositorySearch(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addFilterChip();
+                      }
+                    }}
+                    placeholder="Search by title or keyword"
+                    className="flex-1 px-4 py-2 rounded-md bg-gray-800 text-white border border-gray-600 focus:outline-none focus:ring-2 focus:ring-yellow-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={addFilterChip}
+                    className="bg-yellow-600 hover:bg-yellow-500 text-white px-4 py-2 rounded-md"
+                  >
+                    Search
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => loadRepositoryResumes()}
+                    className="bg-slate-600 hover:bg-slate-500 text-white px-4 py-2 rounded-md"
+                  >
+                    Refresh
+                  </button>
+                </div>
+
+                {activeFilters.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {activeFilters.map((chip) => (
+                      <button
+                        key={chip}
+                        type="button"
+                        onClick={() => removeFilterChip(chip)}
+                        className="px-3 py-1 rounded-full bg-yellow-700 text-white text-sm"
+                      >
+                        {chip} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {selectedRepoResumes.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {selectedRepoResumes.map((resume) => (
+                      <button
+                        key={resume.id}
+                        type="button"
+                        onClick={() => toggleRepositoryResume(resume)}
+                        className="px-3 py-1 rounded-full bg-green-700 text-white text-sm"
+                      >
+                        {resume.title} ×
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {repositoryLoading && (
+                  <p className="text-sm text-gray-300">
+                    Loading repository resumes...
+                  </p>
+                )}
+
+                {repositoryError && (
+                  <p className="text-sm text-red-400">{repositoryError}</p>
+                )}
+
+                {!repositoryLoading && !repositoryError && (
+                  <div className="max-h-72 overflow-y-auto space-y-2">
+                    {filteredRepositoryResumes.length === 0 ? (
+                      <p className="text-sm text-gray-400">No resumes found.</p>
+                    ) : (
+                      filteredRepositoryResumes.map((resume) => {
+                        const checked = selectedRepoResumes.some(
+                          (item) => item.id === resume.id,
+                        );
+
+                        return (
+                          <label
+                            key={resume.id}
+                            className="flex items-start gap-3 p-3 rounded-lg border border-gray-700 bg-gray-800 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleRepositoryResume(resume)}
+                              className="mt-1"
+                            />
+                            <div className="flex-1">
+                              <p className="font-medium text-white">
+                                {resume.title}
+                              </p>
+                              <div className="flex flex-wrap gap-2 mt-2">
+                                {(resume.keywords || [])
+                                  .slice(0, 8)
+                                  .map((keyword) => (
+                                    <span
+                                      key={`${resume.id}-${keyword}`}
+                                      className="px-2 py-1 rounded-full bg-slate-700 text-xs text-gray-200"
+                                    >
+                                      {keyword}
+                                    </span>
+                                  ))}
+                              </div>
+                            </div>
+                          </label>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+            {(files.length > 0 || selectedRepoResumes.length > 0) && (
               <div>
                 <div className="text-sm text-gray-300 mb-1 flex justify-between items-center">
                   <span>
-                    {files.length} resume{files.length > 1 ? "s" : ""} selected
+                    {files.length} uploaded, {effectiveRepoResumes.length} from
+                    repository
                   </span>
                   <button
+                    type="button"
                     onClick={() => setShowAll(!showAll)}
                     className="text-yellow-400 hover:underline text-xs"
                   >
                     {showAll ? "Hide Resumes" : "Show All Resumes"}
                   </button>
                 </div>
+
                 <div
-                  className={`${
-                    showAll ? "max-h-64" : "max-h-28"
-                  } overflow-y-auto border border-gray-600 rounded-md p-2 bg-gray-800 text-xs`}
+                  className={`${showAll ? "max-h-64" : "max-h-28"} overflow-y-auto border border-gray-600 rounded-md p-2 bg-gray-800 text-xs`}
                 >
                   <ul className="list-disc list-inside text-gray-300 space-y-1">
                     {files.map((file, idx) => (
-                      <li key={idx}>{file.name}</li>
+                      <li key={`file-${idx}`}>{file.name}</li>
+                    ))}
+                    {effectiveRepoResumes.map((resume) => (
+                      <li key={`repo-${resume.id}`}>{resume.title}</li>
                     ))}
                   </ul>
                 </div>
@@ -313,7 +544,10 @@ const HomePage = () => {
         </div>
       </div>
 
-      <GeminiResponses jobId={currentJobId} promptType={promptOption} />
+      <div ref={resultsSectionRef} className="scroll-mt-24">
+  <GeminiResponses results={shortlistResults} promptType={promptOption} />
+</div>
+
     </div>
   );
 };

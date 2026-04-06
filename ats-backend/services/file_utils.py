@@ -8,6 +8,6 @@ def compute_file_hash(file_stream):
     hasher = hashlib.sha256()
     for chunk in iter(lambda: file_stream.read(4096), b""):
         hasher.update(chunk)
-    file_stream.seek(0)  
+    file_stream.seek(0)
     return hasher.hexdigest()
 

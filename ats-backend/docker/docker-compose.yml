@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis/redis-stack:latest  
+    container_name: redis-new   # new container name
+    ports:
+      - "6481:6379"             # use a different host port to avoid conflict
+      - "8102:8001"             # admin UI port, different from old one
+    volumes:
+      - redis_new_data:/data    # new volume
+    restart: always
+
+volumes:
+  redis_new_data:

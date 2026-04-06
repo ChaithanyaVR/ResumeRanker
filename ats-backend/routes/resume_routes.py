@@ -46,6 +46,7 @@ def shortlist_route():
                 rerank=rerank,
                 prompt_type=prompt_type
             )
+            print("results",results)
         except ResourceExhausted as re:
             # AI is overloaded — return 503. gemini_responses rows for processed resumes
             print("AI model overloaded:", re)

@@ -9,7 +9,13 @@ async function safeJson(res) {
   }
 }
 
-export async function createJobWithResumes({ user_id, job_title, job_description, files }) {
+export async function createJobWithResumes({
+  user_id,
+  job_title,
+  job_description,
+  files = [],
+  repositoryResumeIds = [],
+}) {
   const formData = new FormData();
   formData.append("user_id", user_id);
   formData.append("job_title", job_title);
@@ -17,6 +23,10 @@ export async function createJobWithResumes({ user_id, job_title, job_description
 
   files.forEach((file) => {
     formData.append("files", file);
+  });
+
+  repositoryResumeIds.forEach((id) => {
+    formData.append("repository_resume_ids", id);
   });
 
   const res = await fetch(`${API_BASE}/jobs-with-resumes`, {
@@ -32,6 +42,33 @@ export async function createJobWithResumes({ user_id, job_title, job_description
   return data;
 }
 
+
+export async function fetchRepositoryResumes(userId, search = "") {
+  const url = new URL(`${API_BASE}/repository-resumes`);
+  url.searchParams.append("user_id", userId);
+
+  if (search.trim()) {
+    url.searchParams.append("search", search.trim());
+  }
+
+  const res = await fetch(url.toString(), { method: "GET" });
+  const data = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to fetch repository resumes");
+  }
+
+  const resumes = data.resumes || [];
+
+  const seen = new Set();
+  return resumes.filter((resume) => {
+    const signature = `${(resume.title || "").toLowerCase()}|${(resume.file_path || "").toLowerCase()}`;
+    if (seen.has(signature)) return false;
+    seen.add(signature);
+    return true;
+  });
+}
+
 export async function fetchJobWithResumes(job_id) {
   if (!job_id) throw new Error("job_id is required");
 
@@ -40,6 +77,7 @@ export async function fetchJobWithResumes(job_id) {
   });
 
   const data = await safeJson(res);
+  console.log('fetched data...',data);
   if (!res.ok || !data.job_id) {
     throw new Error(data.error || "Failed to fetch job details");
   }
@@ -94,6 +132,7 @@ export async function shortlistCandidates({
   });
 
   const data = await safeJson(res);
+  console.log('shortlisted data...',data);
   if (res.status === 503) {
     throw new Error("AI model overloaded. Please try again later.");
   }
@@ -101,4 +140,36 @@ export async function shortlistCandidates({
     throw new Error(data.error || "Failed to shortlist candidates");
   }
   return data.results;
+}
+
+
+
+export async function fetchJobsHistory(userId, page = 1, limit = 10) {
+  const url = new URL(`${API_BASE}/jobs-history`);
+  url.searchParams.append("user_id", userId);
+  url.searchParams.append("page", page);
+  url.searchParams.append("limit", limit);
+
+  const res = await fetch(url.toString(), { method: "GET" });
+  const data = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to fetch jobs history");
+  }
+
+  return data;
+}
+
+export async function deleteJobHistory(userId, jobId) {
+  const url = new URL(`${API_BASE}/jobs-history/${jobId}`);
+  url.searchParams.append("user_id", userId);
+
+  const res = await fetch(url.toString(), { method: "DELETE" });
+  const data = await safeJson(res);
+
+  if (!res.ok) {
+    throw new Error(data.error || "Failed to delete job history");
+  }
+
+  return data;
 }

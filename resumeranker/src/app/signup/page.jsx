@@ -50,7 +50,7 @@ export default function page() {
           password
         );
         const firebaseUser = userCredential.user;
-
+        console.log('firebase credential', firebaseUser);
         // Send user data to backend
         const res = await fetch("http://localhost:8080/signup", {
           method: "POST",

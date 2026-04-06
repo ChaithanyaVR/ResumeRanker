@@ -8,6 +8,7 @@ from pinecone_client import get_index
 from dotenv import load_dotenv
 
 
+
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=True, allow_headers=["Content-Type", "Authorization"])
@@ -23,6 +24,7 @@ app.register_blueprint(user_bp)
 app.register_blueprint(jobs_bp)
 app.register_blueprint(resumes_bp)
 app.register_blueprint(results_bp)
+
 
 
 
